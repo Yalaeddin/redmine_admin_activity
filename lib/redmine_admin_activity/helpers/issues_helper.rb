@@ -35,7 +35,7 @@ module PluginAdminActivity
           details ? details : super
         else
           # Process standard properties like 'attr', 'attachment' or 'cf'
-           super
+          super
         end
       end
     end
@@ -199,7 +199,7 @@ module PluginAdminActivity
       l(:text_journal_changed, :label => label, :old => old_value, :new => value).html_safe
     end
 
-    def show_user_status_details(detail, no_html , options = {})
+    def show_user_status_details(detail, no_html, options = {})
       label = no_html ? l(:text_label_status) : content_tag('strong', l(:text_label_status))
       value = get_user_status_label_for_history[detail.value]
       old_value = get_user_status_label_for_history[detail.old_value]
@@ -229,7 +229,7 @@ module PluginAdminActivity
       value.split(",")
     end
 
-    def show_associations_details(klass_name, key, value, old_value, no_html , options = {})
+    def show_associations_details(klass_name, key, value, old_value, no_html = false, options = {})
       klazz = Object.const_get(klass_name)
       association_class = klazz.reflect_on_all_associations(:has_many).select { |a| a.name.to_s == key }.first.klass
       label_class_name = "label_#{association_class.name.downcase}"
@@ -247,9 +247,44 @@ module PluginAdminActivity
       end
     end
 
-    def show_belongs_to_details(klass_name, key, value, old_value, no_html = false , options = {})
+    def show_has_and_belongs_to_many_details(klass_name, key, value, old_value, no_html = false, options = {})
       klazz = Object.const_get(klass_name)
-      belongs_to_class = klazz.reflect_on_all_associations(:belongs_to).select{ |a| a.foreign_key == key }.first.klass
+      association_class = klazz.reflect_on_all_associations(:has_and_belongs_to_many).select { |a| a.name.to_s == key }.first.klass
+      label_class_name = "label_#{association_class.name.downcase}_plural"
+      val = association_class.where(:id => value)
+      old_val = association_class.where(:id => old_value)
+
+      # If the value is deleted and journalized, try to search it in the journalsetting table(journal_row_destroy) else set Id
+      # In the future (when all models will be traced, we can use the function name_journalized_if_not_exists instead of ids)
+      deleted_ids = (value - val.map(&:id)).map { |s| name_journalized_if_not_exists(association_class.name, s) || s.to_s.prepend('#') }
+      old_deleted_ids = (old_value - old_val.map(&:id)).map { |s| name_journalized_if_not_exists(association_class.name, s) || s.to_s.prepend('#') }
+
+      return l(:text_journal_has_and_belongs_to_many_changed,
+               :class_name => l(label_class_name),
+               :new => (val.map(&:to_s) + deleted_ids).join(", "),
+               :old => (old_val.map(&:to_s) + old_deleted_ids).join(", "))
+    end
+
+    def show_has_many_details(klass_name, key, value, old_value, no_html = false, options = {})
+      klazz = Object.const_get(klass_name)
+      association_class = klazz.reflect_on_all_associations(:has_many).select { |a| a.name.to_s == key }.first.klass
+      label_class_name = "label_#{association_class.name.downcase}"
+
+      val = association_class.where(:id => value)
+      old_val = association_class.where(:id => old_value)
+
+      deleted_ids = (value - val.map(&:id)).map { |s| s.to_s.prepend('#') }
+      old_deleted_ids = (old_value - old_val.map(&:id)).map { |s| s.to_s.prepend('#') }
+
+      return l(:text_journal_has_many_changed,
+               :class_name => l(label_class_name),
+               :new => (val.map(&:to_s) + deleted_ids).join(", "),
+               :old => (old_val.map(&:to_s) + old_deleted_ids).join(", "))
+    end
+
+    def show_belongs_to_details(klass_name, key, value, old_value, no_html = false, options = {})
+      klazz = Object.const_get(klass_name)
+      belongs_to_class = klazz.reflect_on_all_associations(:belongs_to).select { |a| a.foreign_key == key }.first.klass
       label_class_name = "label_#{belongs_to_class.name.downcase}"
       val = belongs_to_class.find_by(:id => value)
       old_val = belongs_to_class.find_by(:id => old_value)
@@ -270,13 +305,13 @@ module PluginAdminActivity
       end
     end
 
-    def show_boolean_details(key, value, old_value, no_html = false , options = {})
+    def show_boolean_details(key, value, old_value, no_html = false, options = {})
       field = key.to_s.gsub(/\_id$/, "")
       label = l(("field_" + field).to_sym)
       l(:text_journal_changed, :label => label, :old => val_to_bool(old_value) ? l(:label_1) : l(:label_0), :new => val_to_bool(value) ? l(:label_1) : l(:label_0))
     end
 
-    def show_principal_detail(detail, no_html , options = {})
+    def show_principal_detail(detail, no_html, options = {})
       if detail.prop_key == 'status'
         show_user_status_details(detail, no_html, options)
       elsif detail.property == 'associations'
@@ -284,7 +319,7 @@ module PluginAdminActivity
           show_associations_details("User", detail.prop_key, detail.value, detail.old_value, no_html, options)
         end
       elsif detail.property == 'attr'
-        if User.reflect_on_all_associations(:belongs_to).select{ |a| a.foreign_key == detail.prop_key }.count > 0
+        if User.reflect_on_all_associations(:belongs_to).select { |a| a.foreign_key == detail.prop_key }.count > 0
           show_belongs_to_details("User", detail.prop_key, detail.value, detail.old_value, no_html, options)
         elsif User.columns_hash[detail.prop_key].present? && User.columns_hash[detail.prop_key].type == :boolean
           show_boolean_details(detail.prop_key, detail.value, detail.old_value, no_html, options)
